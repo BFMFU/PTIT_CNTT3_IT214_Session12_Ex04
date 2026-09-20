@@ -1,0 +1,97 @@
+# application.yml - Checkout Service
+spring:
+  application:
+    name: checkout-service
+
+  cloud:
+    openfeign:
+      client:
+        config:
+          promoClient:
+            errorDecoder: com.example.checkout.config.PromoErrorDecoder
+
+# ============================================================
+# RESILIENCE4J - CẤU HÌNH CIRCUIT BREAKER
+# ============================================================
+resilience4j:
+  circuitbreaker:
+    instances:
+      promoClient:                          # Khớp với @FeignClient(name)
+
+        # --- CỬA SỔ TRƯỢT ---
+        slidingWindowType: COUNT_BASED      # Đếm theo số lượng request
+        slidingWindowSize: 20              # Xét 20 request gần nhất
+
+        # --- NGƯỠNG MỞ MẠCH ---
+        failureRateThreshold: 50           # Mở mạch khi >= 50% là lỗi hệ thống
+        slowCallRateThreshold: 80
+        slowCallDurationThreshold: 3000    # Ngưỡng "chậm" = 3 giây
+
+        # --- THỜI GIAN CHỜ Ở TRẠNG THÁI OPEN ---
+        waitDurationInOpenState: 30s
+
+        # --- CẤU HÌNH HALF-OPEN ---
+        permittedNumberOfCallsInHalfOpenState: 5
+
+        # --- MINIMUM REQUESTS ĐỂ TÍNH FAILURE RATE ---
+        minimumNumberOfCalls: 10
+
+        # ============================================================
+        # BỘ LỌC LỖI - PHẦN QUAN TRỌNG NHẤT
+        # ============================================================
+
+        # CHIẾN LƯỢC 1: ignoreExceptions (Khuyến nghị)
+        # Liệt kê các exception LỖI NGHIỆP VỤ cần BỎ QUA
+        # Circuit Breaker sẽ KHÔNG tính chúng vào failure rate
+        ignoreExceptions:
+          - com.example.checkout.exception.VoucherNotFoundException
+          # Thêm các lỗi nghiệp vụ khác nếu có:
+          # - com.example.checkout.exception.VoucherExpiredException
+          # - com.example.checkout.exception.VoucherAlreadyUsedException
+
+        # CHIẾN LƯỢC 2: recordExceptions (Thay thế hoặc kết hợp)
+        # Chỉ những exception này mới tính vào failure rate
+        recordExceptions:
+          - java.io.IOException
+          - java.net.ConnectException
+          - java.util.concurrent.TimeoutException
+          - java.net.SocketTimeoutException
+          - feign.RetryableException
+
+  # --- CẤU HÌNH RETRY ---
+  retry:
+    instances:
+      promoClient:
+        maxAttempts: 3
+        waitDuration: 500ms
+        # Chỉ retry lỗi hệ thống, KHÔNG retry lỗi nghiệp vụ
+        retryExceptions:
+          - java.net.ConnectException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions:
+          - com.example.checkout.exception.VoucherNotFoundException
+
+  # --- TIMEOUT ---
+  timelimiter:
+    instances:
+      promoClient:
+        timeoutDuration: 2s
+
+# ============================================================
+# ACTUATOR - THEO DÕI CIRCUIT BREAKER
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,circuitbreakers,metrics
+  health:
+    circuitbreakers:
+      enabled: true
+  endpoint:
+    health:
+      show-details: always
+
+promo:
+  service:
+    url: http://promo-service:8082
